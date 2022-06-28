@@ -94,6 +94,72 @@ class SeparateFeatureNetwork(torch.nn.Module):
         dist = get_dist(logits, self.action_space)
         return dist, None, value
 
+########################### SAC #####################################################
+class BaseNetwork(torch.nn.Module):
+    def save(self, path:str):
+        torch.save(self.state_dict(), path)
+    
+    def load(self, path:str):
+        self.load_state_dict(torch.load(path))
+
+class CriticNetwork(BaseNetwork):
+    def __init__(self, observation_space: Space, hidden_size:int=128):
+        super(CriticNetwork, self).__init__()
+
+        self.in_size = observation_space.shape[0]
+
+        self.critic = torch.nn.Sequential(
+            torch.nn.Linear(self.in_size, hidden_size),
+            torch.nn.Tanh(),
+            torch.nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        value = self.critic(state)
+
+        return value
+
+class TwinedCriticNetwork(BaseNetwork):
+    def __init__(self, observation_space: Space, hidden_size:int=128):
+        super(TwinedCriticNetwork, self).__init__()
+
+        self.critic_1 = CriticNetwork(observation_space = observation_space, hidden_size = hidden_size)
+        self.critic_2 = CriticNetwork(observation_space = observation_space, hidden_size = hidden_size)
+
+    def forward(self, states:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        value_1=self.critic_1(x)
+        value_2=self.critic_2(x)
+
+        return value_1, value_2
+
+class PolicyNetwork(BaseNetwork):
+    def __init__(self, observation_space: Space, action_space: Space, hidden_size:int=128):
+        super(PolicyNetwork, self).__init__()
+        self.observation_space = observation_space
+        self.action_space = action_space        
+        
+        self.in_size = observation_space.shape[0]
+        self.out_size = action_space.shape[0]
+        if isinstance(action_space, Box):
+            self.out_size = self.out_size * 2
+
+        self.hidden_size = hidden_size
+        self.policy_net = torch.nn.Sequential(
+            layer_init(torch.nn.Linear(self.in_size, hidden_size)),
+            torch.nn.Tanh(),
+            layer_init(torch.nn.Linear(hidden_size, hidden_size)),
+            torch.nn.Tanh(),
+            layer_init(torch.nn.Linear(hidden_size, self.out_size), std=0.01)
+        )     
+    
+    def forward(self, states:torch.Tensor) -> torch.distributions.Normal:
+        logits=self.policy_net(states)
+        dist=get_dist(logits, self.action_space)
+
+        return dist
+
+####################################################################################
 
 def layer_init(layer, std: float = np.sqrt(2), bias_const: float = 0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
